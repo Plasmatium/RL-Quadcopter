@@ -4,6 +4,29 @@ import pdb
 import numpy as np
 from quad_controller_rl.agents.base_agent import BaseAgent
 
+class OUNoise:
+    """Ornstein-Uhlenbeck process."""
+
+    def __init__(self, size, mu=None, theta=0.15, sigma=0.3):
+        """Initialize parameters and noise process."""
+        self.size = size
+        self.mu = mu if mu is not None else np.zeros(self.size)
+        self.theta = theta
+        self.sigma = sigma
+        self.state = np.ones(self.size) * self.mu
+        self.reset()
+
+    def reset(self):
+        """Reset the internal state (= noise) to mean (mu)."""
+        self.state = self.mu
+
+    def sample(self):
+        """Update internal state and return it as a noise sample."""
+        x = self.state
+        dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(len(x))
+        self.state = x + dx
+        return self.state
+
 class Exp:
     def __init__(self, size=1000):
         self.size=size
@@ -36,7 +59,7 @@ class DDPG(BaseAgent):
     """Sample agent that searches for optimal policy randomly."""
 
     def __init__(self, task):
-        
+        print('agent init\n'*5)
         # Task (environment) information
         self.task = task  # should contain observation_space and action_space
         self.state_size = np.prod(self.task.observation_space.shape)
@@ -48,11 +71,11 @@ class DDPG(BaseAgent):
         '''------------------------------------------------------------------------------------'''
         # 新加入
         # Constrain state and action spaces
-#         self.state_size = 3  # position only
-#         self.action_size = 3  # force only
-#         print("Original spaces: {}, {}\nConstrained spaces: {}, {}".format(
-#             self.task.observation_space.shape, self.task.action_space.shape,
-#             self.state_size, self.action_size))
+        self.state_size = 3  # position only
+        self.action_size = 3  # force only
+        print("Original spaces: {}, {}\nConstrained spaces: {}, {}".format(
+            self.task.observation_space.shape, self.task.action_space.shape,
+            self.state_size, self.action_size))
         
         '''------------------------------------------------------------------------------------'''
         # Policy parameters
@@ -83,6 +106,7 @@ class DDPG(BaseAgent):
         self.last_action = None
         self.total_reward = 0.0
         self.count = 0
+        print('agent reset_episode\n'*5)
 
     def step(self, state, reward, done):
         # Transform state vector
