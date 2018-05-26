@@ -4,6 +4,34 @@ import pdb
 import numpy as np
 from quad_controller_rl.agents.base_agent import BaseAgent
 
+class Exp:
+    def __init__(self, size=1000):
+        self.size=size
+        self.memory = np.zeros([self.size, 5])
+        self.is_full = False
+        self.idx = 0
+        
+    def add(self, s, a, r, s_, d):
+        if self.idx == self.size:
+            self.idx = 0
+            if not self.is_full:
+                self.is_full = True
+        
+        self.memory[self.idx] = np.array([s, a, r, s_, int(d)])
+        self.idx += 1
+        
+    def sample(self, batchsize=64):
+        if self.is_full:
+            choose_range = self.size
+            choose_batch = batchsize
+        else:
+            choose_range = self.idx
+            choose_batch = min(self.idx, batchsize)
+        
+        choose_idx = np.random.choice(choose_range, choose_batch)
+        return self.memory[choose_idx]
+        
+
 class DDPG(BaseAgent):
     """Sample agent that searches for optimal policy randomly."""
 
