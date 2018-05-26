@@ -164,7 +164,7 @@ class DDPG(BaseAgent):
         '''初始化ounoise------------------------------------------------------------------------------------'''
         # 给输出网络输出action增加探索性噪音，考虑到重力，升力均值要为正
         mu = np.zeros(shape=self.action_size)
-        mu[2] = 15.0
+        mu[2] = 20.0
         self.noise_maker = OUNoise(size=self.action_size, mu=mu)
         self.noise_maker.reset()
 

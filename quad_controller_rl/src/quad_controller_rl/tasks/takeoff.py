@@ -65,22 +65,23 @@ class Takeoff(BaseTask):
         # 1. 当前位置和target_point越近越好（考虑到需要克服重力，z轴减小惩罚）
         # 2. 尽量小的翻转
         curr_point = np.array([pose.position.x, pose.position.y, pose.position.z])
-        dist_xy = np.linalg.norm(curr_point[:1] - self.target_point[:1])
-        dist_z = np.abs(curr_point[2] - self.target_point[2])
+        # dist_xy = np.linalg.norm(curr_point[:1] - self.target_point[:1])
+        # dist_z = np.abs(curr_point[2] - self.target_point[2])
         dist = np.linalg.norm(curr_point - self.target_point)
 
-        reward = min(np.log(1/(dist_xy + 1e-6)), 8)
-        reward += min(np.log(1/(dist_z/100 + 1e-6)), 200)    
+        # reward_xy = min(np.log(1/(dist_xy/100 + 1e-6)), 8)-5
+        # reward_z = min(np.log(1/(dist_z/500 + 1e-6)), 8)
+        reward = min(np.log(1/(dist/500 + 1e-6)), 8)
 
         if curr_point[2] >= self.target_point[2]:
-            reward += 50.0 
+            reward += 10.0 
             done = True
         elif timestamp > self.max_duration:
-            reward -= 50.0
+            reward -= 10.0
             done = True
 
-        print('realtime reword is {:.3f}\t dist is {:.3f}\t'.format(reward, dist),
-            end='\r')
+        print('realtime reword is {:.3f} | dist is {:.3f}'.format(
+            reward, dist),end='\r')
 
         # Take one RL step, passing in current state and reward, and obtain action
         # Note: The reward passed in here is the result of past action(s)
