@@ -3,7 +3,10 @@ import pdb
 
 import numpy as np
 from quad_controller_rl.agents.base_agent import BaseAgent
-from keras.layers import Dense, Flatten, Input, merge, Lambda, Activation
+from keras.layers import Dense, Flatten, Input, merge, Lambda, Activation, Add
+from keras.optimizers import Adam
+from keras.models import Model
+from keras import backend as K
 
 class OUNoise:
     """Ornstein-Uhlenbeck process."""
@@ -61,20 +64,58 @@ class Exp:
 '''先使用论文中的参数尝试下'''
 H1_UNITS = 400
 H2_UNITS = 300
+ACTOR_LR = 1e-4
+CRITIC_LR = 1e-3
    
 class Actor:
-    def __init__(self, state_size, action_size):
-        state_in = Input(shape=[state_size])
-        h1 = Dense(H1_UNITS, activation='relu')(state_in)
-        h2 = Dense(H2_UNITS, activation='relu')(h1)
-        action = Dense(action_size, activation='tanh')
+    def __init__(self, state_size, action_size, action_max):
+        states_in = Input(shape=[state_size])
+        h1 = Dense(units=H1_UNITS, activation='relu')(states_in)
+        h2 = Dense(units=H2_UNITS, activation='relu')(h1)
+        raw_actions = Dense(units=action_size, activation='tanh')(h2)
+        actions = Lambda(lambda ra: ra*action_max)(raw_actions)
 
-        self.model = Model(input=state_in, output=action)
+        self.model = Model(input=states_in, output=actions)
+        
+        # TODO：以下梯度策略算法没搞明白
+        action_gradients = Input(shape=[action_size])
+        loss = K.mean(-action_gradients * actions)
+        # Incorporate any additional losses here (e.g. from regularizers)
+        optimizer = Adam(lr=ACTOR_LR)
+        updates_op = optimizer.get_updates(params=self.model.trainable_weights, loss=loss)
+        self.train_fn = K.function(
+            inputs=[self.model.input, action_gradients, K.learning_phase()],
+            outputs=[],
+            updates=updates_op)
+
 
 class Critic:
-    def __init__(self, state_size, action_size)
+    def __init__(self, state_size, action_size):
         '''根据论文（P11），actions在第二隐层引入'''
-        
+        states_in = Input(shape=[state_size])
+        actions_in = Input(shape=[action_size])
+
+        s1 = Dense(units=H1_UNITS, activation='relu')(states_in)
+
+        s_merge = Dense(units=H2_UNITS, activation='linear')(s1)
+        a_merge = Dense(units=H2_UNITS, activation='linear')(actions_in)
+        sa = Add()([s_merge, a_merge])
+        h1 = Activation('relu')(sa)
+
+        h2 = Dense(units=H2_UNITS, activation='relu')(h1)
+
+        q_values = Dense(units=1, activation='linear')(h2)
+
+        self.model = Model(inputs=[states_in, actions_in], outputs=q_values)
+        optimizer = Adam(lr=CRITIC_LR)
+        self.model.compile(optimizer=optimizer, loss='mse')
+
+        action_gradients = K.gradients(q_values, actions_in)
+
+        self.get_action_gradients = K.function(
+            inputs=[*self.model.input, K.learning_phase],
+            outputs=action_gradients)
+
 
 class DDPG(BaseAgent):
     """Sample agent that searches for optimal policy randomly."""
