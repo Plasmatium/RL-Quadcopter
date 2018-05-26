@@ -3,6 +3,7 @@ import pdb
 
 import numpy as np
 from quad_controller_rl.agents.base_agent import BaseAgent
+from keras.layers import Dense, Flatten, Input, merge, Lambda, Activation
 
 class OUNoise:
     """Ornstein-Uhlenbeck process."""
@@ -27,8 +28,10 @@ class OUNoise:
         self.state = x + dx
         return self.state
 
+
 class Exp:
-    def __init__(self, size=1000):
+    '''经验池'''
+    def __init__(self, size=int(1e6)):
         self.size=size
         self.memory = np.zeros([self.size, 5])
         self.is_full = False
@@ -53,13 +56,34 @@ class Exp:
         
         choose_idx = np.random.choice(choose_range, choose_batch)
         return self.memory[choose_idx]
+
+
+'''先使用论文中的参数尝试下'''
+H1_UNITS = 400
+H2_UNITS = 300
+   
+class Actor:
+    def __init__(self, state_size, action_size):
+        state_in = Input(shape=[state_size])
+        h1 = Dense(H1_UNITS, activation='relu')(state_in)
+        h2 = Dense(H2_UNITS, activation='relu')(h1)
+        action = Dense(action_size, activation='tanh')
+
+        self.model = Model(input=state_in, output=action)
+
+class Critic:
+    def __init__(self, state_size, action_size)
+        '''根据论文（P11），actions在第二隐层引入'''
         
 
 class DDPG(BaseAgent):
     """Sample agent that searches for optimal policy randomly."""
 
     def __init__(self, task):
-        print('agent init\n'*5)
+        self.TAU = 1e-3
+        self.GAMMA = 0.99
+        
+
         # Task (environment) information
         self.task = task  # should contain observation_space and action_space
         self.state_size = np.prod(self.task.observation_space.shape)
