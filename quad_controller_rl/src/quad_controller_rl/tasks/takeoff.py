@@ -30,7 +30,10 @@ class Takeoff(BaseTask):
 
         # Task-specific parameters
         self.max_duration = 5.0  # secs
-        self.target_z = 10.0  # target height (z position) to reach for successful takeoff
+        # self.target_z = 10.0  # target height (z position) to reach for successful takeoff
+        # 需要更确切的target，提供三维坐标
+        self.target_point = np.array([0.0, 0.0, 10.0])
+        self.threshold = 3.0
 
     def reset(self):
         # Nothing to reset; just return initial condition
@@ -44,20 +47,40 @@ class Takeoff(BaseTask):
             )
 
     def update(self, timestamp, pose, angular_velocity, linear_acceleration):
-        # Prepare state vector (pose only; ignore angular_velocity, linear_acceleration)
         state = np.array([
                 pose.position.x, pose.position.y, pose.position.z,
                 pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w])
 
         # Compute reward / penalty and check if this episode is complete
         done = False
-        reward = -min(abs(self.target_z - pose.position.z), 20.0)  # reward = zero for matching target z, -ve as you go farther, upto -20
-        if pose.position.z >= self.target_z:  # agent has crossed the target height
-            reward += 10.0  # bonus reward
+        '''项目自带reward判定方式------------------------------------'''
+        # reward = -min(abs(self.target_z - pose.position.z), 20.0)  # reward = zero for matching target z, -ve as you go farther, upto -20
+        # if pose.position.z >= self.target_z:  # agent has crossed the target height
+        #     reward += 10.0  # bonus reward
+        #     done = True
+        # elif timestamp > self.max_duration:  # agent has run out of time
+        #     reward -= 10.0  # extra penalty
+        #     done = True
+        '''----------------------------------------------------------'''
+        # 1. 当前位置和target_point越近越好（考虑到需要克服重力，z轴减小惩罚）
+        # 2. 尽量小的翻转
+        curr_point = np.array([pose.position.x, pose.position.y, pose.position.z])
+        dist_xy = np.linalg.norm(curr_point[:1] - self.target_point[:1])
+        dist_z = np.abs(curr_point[2] - self.target_point[2])
+        dist = np.linalg.norm(curr_point - self.target_point)
+
+        reward = min(np.log(1/(dist_xy + 1e-6)), 8)
+        reward += min(np.log(1/(dist_z/100 + 1e-6)), 200)    
+
+        if curr_point[2] >= self.target_point[2]:
+            reward += 50.0 
             done = True
-        elif timestamp > self.max_duration:  # agent has run out of time
-            reward -= 10.0  # extra penalty
+        elif timestamp > self.max_duration:
+            reward -= 50.0
             done = True
+
+        print('realtime reword is {:.3f}\t dist is {:.3f}\t'.format(reward, dist),
+            end='\r')
 
         # Take one RL step, passing in current state and reward, and obtain action
         # Note: The reward passed in here is the result of past action(s)

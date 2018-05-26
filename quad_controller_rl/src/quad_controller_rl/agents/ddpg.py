@@ -6,12 +6,13 @@ from quad_controller_rl.agents.base_agent import BaseAgent
 from keras.layers import Dense, Flatten, Input, merge, Lambda, Activation, Add
 from keras.optimizers import Adam
 from keras.models import Model
+from keras.layers.normalization import BatchNormalization
 from keras import backend as K
 
 class OUNoise:
     """Ornstein-Uhlenbeck process."""
 
-    def __init__(self, size, mu=None, theta=0.15, sigma=0.3):
+    def __init__(self, size, mu=None, theta=0.3, sigma=0.3):
         """Initialize parameters and noise process."""
         self.size = size
         self.mu = mu if mu is not None else np.zeros(self.size)
@@ -74,7 +75,9 @@ class Actor:
     def __init__(self, state_size, action_size, action_max):
         states_in = Input(shape=[state_size])
         h1 = Dense(units=H1_UNITS, activation='relu')(states_in)
+        h1 = BatchNormalization()(h1)
         h2 = Dense(units=H2_UNITS, activation='relu')(h1)
+        h2 = BatchNormalization()(h2)
         raw_actions = Dense(units=action_size, activation='tanh')(h2)
         actions = Lambda(lambda ra: ra*action_max)(raw_actions)
 
@@ -103,9 +106,11 @@ class Critic:
         s_merge = Dense(units=H2_UNITS, activation='linear')(s1)
         a_merge = Dense(units=H2_UNITS, activation='linear')(actions_in)
         sa = Add()([s_merge, a_merge])
+        sa = BatchNormalization()(sa)
         h1 = Activation('relu')(sa)
 
         h2 = Dense(units=H2_UNITS, activation='relu')(h1)
+        h2 = BatchNormalization()(h2)
 
         q_values = Dense(units=1, activation='linear')(h2)
 
@@ -157,16 +162,19 @@ class DDPG(BaseAgent):
             self.critic_local.model.get_weights())
 
         '''初始化ounoise------------------------------------------------------------------------------------'''
-        # 给输出网络输出action增加探索性噪音
-        self.noise_maker = OUNoise(size=self.action_size)
+        # 给输出网络输出action增加探索性噪音，考虑到重力，升力均值要为正
+        mu = np.zeros(shape=self.action_size)
+        mu[2] = 15.0
+        self.noise_maker = OUNoise(size=self.action_size, mu=mu)
         self.noise_maker.reset()
 
         '''初始化Experience---------------------------------------------------------------------------------'''
         self.exp = Exp(self.EXP_SIZE)
 
         # Score tracker
-        self.count = 0
         self.best_score = -np.inf
+
+        self.t = 0
 
         # Episode variables
         self.reset_episode_vars()
@@ -189,12 +197,21 @@ class DDPG(BaseAgent):
         self.last_state = None
         self.last_action = None
         self.total_reward = 0.0
+        self.count = 0
+        self.noise_maker.reset()
 
         # each episode should update noise
 
         # print('agent reset_episode\n'*5)
 
     def step(self, state, reward, done):
+        # 修正重力影响
+        # curr_z = state[2]
+        # target_z = self.task.target_point[2]
+        # vec_z = target_z - curr_z
+        # mu_z = min(vec_z**3*0.05 - 3, 25)
+        # self.noise_maker.mu[2] = mu_z
+
         # Transform state vector
         state = (state - self.task.observation_space.low) / self.state_range  # scale to [0.0, 1.0]
         state = state.reshape(1, -1)  # convert to row vector
@@ -203,6 +220,7 @@ class DDPG(BaseAgent):
         # Choose an action
         action = self.act(state)
             
+        self.t += 1
         # Save experience / reward
         if self.last_state is not None and self.last_action is not None:
             self.total_reward += reward
@@ -226,6 +244,7 @@ class DDPG(BaseAgent):
     def act(self, states):
         states = np.reshape(states, [-1, self.state_size])
         actions = self.actor_local.model.predict(states)
+
         return actions + self.noise_maker.sample()
 
     def learn(self, exps):
@@ -254,9 +273,9 @@ class DDPG(BaseAgent):
         self.soft_update(self.critic_local.model, self.critic_target.model)
         self.soft_update(self.actor_local.model, self.actor_target.model)
 
-        if self.count % 50 == 0:
+        if self.t % 50 == 0:
             print("RandomPolicySearch.learn(): t = {:4d}, score = {:7.3f} (best = {:7.3f}), noise_scale = {}".format(
-                    self.count, score, self.best_score, self.noise_maker.state))  # [debug]
+                    self.t, score, self.best_score, self.noise_maker.state))  # [debug]
         #print(self.w)  # [debug: policy parameters]
 
     def soft_update(self, local_model, target_model):
