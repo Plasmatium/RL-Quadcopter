@@ -19,6 +19,10 @@ class Takeoff(BaseTask):
         # Action space: <force_x, .._y, .._z, torque_x, .._y, .._z>
         max_force = 25.0
         max_torque = 25.0
+        
+        # action_max 用来配合Actor参数，实际和上面两个的意思一样的
+        self.action_max = 25.0
+
         self.action_space = spaces.Box(
             np.array([-max_force, -max_force, -max_force, -max_torque, -max_torque, -max_torque]),
             np.array([ max_force,  max_force,  max_force,  max_torque,  max_torque,  max_torque]))

@@ -123,8 +123,10 @@ class DDPG(BaseAgent):
     def __init__(self, task):
         self.TAU = 1e-3
         self.GAMMA = 0.99
-        
+        self.EXP_SIZE = int(1e6)
+        self.BATCH_SIZE = 64
 
+        '''接受任务------------------------------------------------------------------------------------'''
         # Task (environment) information
         self.task = task  # should contain observation_space and action_space
         self.state_size = np.prod(self.task.observation_space.shape)
@@ -132,30 +134,38 @@ class DDPG(BaseAgent):
         self.action_size = np.prod(self.task.action_space.shape)
         self.action_range = self.task.action_space.high - self.task.action_space.low
         
-        
-        '''------------------------------------------------------------------------------------'''
-        # 新加入
-        # Constrain state and action spaces
-        self.state_size = 3  # position only
-        self.action_size = 3  # force only
+        '''限制动作和状态空间------------------------------------------------------------------------------------'''
+        self.state_size = 3  # position only 不考虑方向
+        self.action_size = 3  # force only 不考虑力矩
         print("Original spaces: {}, {}\nConstrained spaces: {}, {}".format(
             self.task.observation_space.shape, self.task.action_space.shape,
             self.state_size, self.action_size))
-        
-        '''------------------------------------------------------------------------------------'''
-        # Policy parameters
-        self.w = np.random.normal(
-            size=(self.state_size, self.action_size),  # weights for simple linear policy: state_space x action_space
-            scale=(self.action_range[:self.action_size] / (2 * self.state_size)).reshape(1, -1))  # start producing actions in a decent range
-        
-        # 初始化ounoise，给输出网络输出action增加探索性噪音
-        # ounoise在每个episode需要在self.reset_episode_vars中reset
-        self.ounoise = OUNoise(size=self.action_size)
+
+        '''创建Actor和Critic俩基友------------------------------------------------------------------------------------'''
+        self.actor_local = Actor(state_size, action_size, self.task.action_max)
+        self.critic_local = Critic(state_size, action_size)
+        self.actor_target = Actor(state_size, action_size, self.task.action_max)
+        self.critic_target = Critic(state_size, action_size)
+
+        # 复制local的weights到target上
+        self.actor_target.model.set_weights(
+            self.actor_local.model.get_weights())
+        self.critic_target.model.set_weights(
+            self.critic_local.model.get_weights())
+
+        '''初始化ounoise------------------------------------------------------------------------------------'''
+        # 给输出网络输出action增加探索性噪音
+        # noise_maker在每个episode需要在self.reset_episode_vars中sample（noise需要更新）
+        self.noise_maker = OUNoise(size=self.action_size)
+        self.noise_maker.reset()
+        self.noise = None
+
+        '''初始化Experience---------------------------------------------------------------------------------'''
+        self.exp = Exp(self.EXP_SIZE)
 
         # Score tracker and learning parameters
         self.best_w = None
         self.best_score = -np.inf
-        self.noise_scale = 0.1
 
         # Episode variables
         self.reset_episode_vars()
@@ -175,9 +185,9 @@ class DDPG(BaseAgent):
         self.last_action = None
         self.total_reward = 0.0
         self.count = 0
-        self.ounoise.reset()
 
-        # each episode should reset ounoise
+        # each episode should update noise
+        self.noise = self.noise_maker.sample()
 
         print('agent reset_episode\n'*5)
 
