@@ -82,6 +82,10 @@ class DDPG(BaseAgent):
         self.w = np.random.normal(
             size=(self.state_size, self.action_size),  # weights for simple linear policy: state_space x action_space
             scale=(self.action_range[:self.action_size] / (2 * self.state_size)).reshape(1, -1))  # start producing actions in a decent range
+        
+        # 初始化ounoise，给输出网络输出action增加探索性噪音
+        # ounoise在每个episode需要在self.reset_episode_vars中reset
+        self.ounoise = OUNoise(size=self.action_size)
 
         # Score tracker and learning parameters
         self.best_w = None
@@ -106,6 +110,10 @@ class DDPG(BaseAgent):
         self.last_action = None
         self.total_reward = 0.0
         self.count = 0
+        self.ounoise.reset()
+
+        # each episode should reset ounoise
+
         print('agent reset_episode\n'*5)
 
     def step(self, state, reward, done):
