@@ -34,7 +34,7 @@ class Takeoff(BaseTask):
 
     def reset(self):
         # Nothing to reset; just return initial condition
-        print('update reseeeeeeeeeeeeeeeeeeeeeeeet\n'*5)
+        # print('update reseeeeeeeeeeeeeeeeeeeeeeeet\n'*5)
         return Pose( 
                 position=Point(0.0, 0.0, np.random.normal(0.5, 0.1)),  # drop off from a slight random height
                 orientation=Quaternion(0.0, 0.0, 0.0, 0.0),

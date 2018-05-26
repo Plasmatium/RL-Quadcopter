@@ -36,7 +36,7 @@ class Exp:
     '''经验池'''
     def __init__(self, size=int(1e6)):
         self.size=size
-        self.memory = np.zeros([self.size, 5])
+        self.memory = [None]*size
         self.is_full = False
         self.idx = 0
         
@@ -46,7 +46,7 @@ class Exp:
             if not self.is_full:
                 self.is_full = True
         
-        self.memory[self.idx] = np.array([s, a, r, s_, int(d)])
+        self.memory[self.idx] = (s, a, r, s_, int(d))
         self.idx += 1
         
     def sample(self, batchsize=64):
@@ -57,13 +57,16 @@ class Exp:
             choose_range = self.idx
             choose_batch = min(self.idx, batchsize)
         
-        choose_idx = np.random.choice(choose_range, choose_batch)
-        return self.memory[choose_idx]
+        if choose_range == 0:
+            return None
+        
+        indeces = np.random.choice(choose_range, choose_batch)
+        return [self.memory[idx] for idx in indeces]
 
 
 '''先使用论文中的参数尝试下'''
-H1_UNITS = 400
-H2_UNITS = 300
+H1_UNITS = 64*7
+H2_UNITS = 64*5
 ACTOR_LR = 1e-4
 CRITIC_LR = 1e-3
    
@@ -75,7 +78,7 @@ class Actor:
         raw_actions = Dense(units=action_size, activation='tanh')(h2)
         actions = Lambda(lambda ra: ra*action_max)(raw_actions)
 
-        self.model = Model(input=states_in, output=actions)
+        self.model = Model(inputs=states_in, outputs=actions)
         
         # TODO：以下梯度策略算法没搞明白
         action_gradients = Input(shape=[action_size])
@@ -113,7 +116,7 @@ class Critic:
         action_gradients = K.gradients(q_values, actions_in)
 
         self.get_action_gradients = K.function(
-            inputs=[*self.model.input, K.learning_phase],
+            inputs=[*self.model.input, K.learning_phase()],
             outputs=action_gradients)
 
 
@@ -142,10 +145,10 @@ class DDPG(BaseAgent):
             self.state_size, self.action_size))
 
         '''创建Actor和Critic俩基友------------------------------------------------------------------------------------'''
-        self.actor_local = Actor(state_size, action_size, self.task.action_max)
-        self.critic_local = Critic(state_size, action_size)
-        self.actor_target = Actor(state_size, action_size, self.task.action_max)
-        self.critic_target = Critic(state_size, action_size)
+        self.actor_local = Actor(self.state_size, self.action_size, self.task.action_max)
+        self.critic_local = Critic(self.state_size, self.action_size)
+        self.actor_target = Actor(self.state_size, self.action_size, self.task.action_max)
+        self.critic_target = Critic(self.state_size, self.action_size)
 
         # 复制local的weights到target上
         self.actor_target.model.set_weights(
@@ -155,84 +158,110 @@ class DDPG(BaseAgent):
 
         '''初始化ounoise------------------------------------------------------------------------------------'''
         # 给输出网络输出action增加探索性噪音
-        # noise_maker在每个episode需要在self.reset_episode_vars中sample（noise需要更新）
         self.noise_maker = OUNoise(size=self.action_size)
         self.noise_maker.reset()
-        self.noise = None
 
         '''初始化Experience---------------------------------------------------------------------------------'''
         self.exp = Exp(self.EXP_SIZE)
 
-        # Score tracker and learning parameters
-        self.best_w = None
+        # Score tracker
+        self.count = 0
         self.best_score = -np.inf
 
         # Episode variables
         self.reset_episode_vars()
     
-    def preprocess_state(self, state):
+    def preprocess_states(self, states):
         """Reduce state vector to relevant dimensions."""
-        return state[0:self.state_size]  # position only
+        return np.array(
+            [state[0:self.state_size] for state in states])
 
-    def postprocess_action(self, action):
+    def postprocess_actions(self, actions):
         """Return complete action vector."""
-        complete_action = np.zeros(self.task.action_space.shape)  # shape: (6,)
-        complete_action[0:self.action_size] = action  # linear force only
-        return complete_action
+        def process(action):
+            complete_action = np.zeros(self.task.action_space.shape)
+            complete_action[0:self.action_size] = action
+            return complete_action      
+
+        return np.array([process(action) for action in actions])
 
     def reset_episode_vars(self):
         self.last_state = None
         self.last_action = None
         self.total_reward = 0.0
-        self.count = 0
 
         # each episode should update noise
-        self.noise = self.noise_maker.sample()
 
-        print('agent reset_episode\n'*5)
+        # print('agent reset_episode\n'*5)
 
     def step(self, state, reward, done):
         # Transform state vector
         state = (state - self.task.observation_space.low) / self.state_range  # scale to [0.0, 1.0]
         state = state.reshape(1, -1)  # convert to row vector
 
-        state = np.array([self.preprocess_state(s) for s in state])
+        state = self.preprocess_states(state)
         # Choose an action
         action = self.act(state)
-        action = np.array([self.postprocess_action(a) for a in action])
             
         # Save experience / reward
         if self.last_state is not None and self.last_action is not None:
             self.total_reward += reward
             self.count += 1
+            self.exp.add(self.last_state, self.last_action, reward, state, done)
 
-        # Learn, if at end of episode
+        exps = self.exp.sample(self.BATCH_SIZE)
+        if (exps is not None):
+            self.learn(exps)        
+
         if done:
-            self.learn()
+            # self.learn()
             self.reset_episode_vars()
 
         self.last_state = state
         self.last_action = action
+
+        action = self.postprocess_actions(action)
         return action
 
-    def act(self, state):
-        # Choose action based on given state and policy
-        action = np.dot(state, self.w)  # simple linear policy
-        #print(action)  # [debug: action vector]
-        return action
+    def act(self, states):
+        states = np.reshape(states, [-1, self.state_size])
+        actions = self.actor_local.model.predict(states)
+        return actions + self.noise_maker.sample()
 
-    def learn(self):
+    def learn(self, exps):
         # Learn by random policy search, using a reward-based score
         score = self.total_reward / float(self.count) if self.count else 0.0
         if score > self.best_score:
             self.best_score = score
-            self.best_w = self.w
-            self.noise_scale = max(0.5 * self.noise_scale, 0.01)
-        else:
-            self.w = self.best_w
-            self.noise_scale = min(2.0 * self.noise_scale, 3.2)
+            # TODO: save weights
+        
+        '''用经验值batch更新策略和权重'''
+        states = np.vstack([e[0] for e in exps if e is not None])
+        actions = np.array([e[1] for e in exps if e is not None]).astype(np.float32).reshape(-1, self.action_size)
+        rewards = np.array([e[2] for e in exps if e is not None]).astype(np.float32).reshape(-1, 1)
+        next_states = np.vstack([e[3] for e in exps if e is not None])
+        dones = np.array([e[4] for e in exps if e is not None]).astype(np.uint8).reshape(-1, 1)
 
-        self.w = self.w + self.noise_scale * np.random.normal(size=self.w.shape)  # equal noise in all directions
-        print("RandomPolicySearch.learn(): t = {:4d}, score = {:7.3f} (best = {:7.3f}), noise_scale = {}".format(
-                self.count, score, self.best_score, self.noise_scale))  # [debug]
+        actions_next = self.actor_target.model.predict_on_batch(next_states)
+        Q_targets_next = self.critic_target.model.predict_on_batch([next_states, actions_next])
+
+        Q_targets = rewards + self.GAMMA * Q_targets_next * (1 - dones)
+        self.critic_local.model.train_on_batch(x=[states, actions], y=Q_targets)
+
+        action_gradients = np.reshape(self.critic_local.get_action_gradients([states, actions, 0]), (-1, self.action_size))
+        self.actor_local.train_fn([states, action_gradients, 1])
+
+        self.soft_update(self.critic_local.model, self.critic_target.model)
+        self.soft_update(self.actor_local.model, self.actor_target.model)
+
+        if self.count % 50 == 0:
+            print("RandomPolicySearch.learn(): t = {:4d}, score = {:7.3f} (best = {:7.3f}), noise_scale = {}".format(
+                    self.count, score, self.best_score, self.noise_maker.state))  # [debug]
         #print(self.w)  # [debug: policy parameters]
+
+    def soft_update(self, local_model, target_model):
+        local_weights = np.array(local_model.get_weights())
+        target_weights = np.array(target_model.get_weights())
+
+        new_weights = self.TAU * local_weights + (1 - self.TAU) * target_weights
+        target_model.set_weights(new_weights)
