@@ -1,9 +1,14 @@
 """Takeoff task."""
+import pdb
 
 import numpy as np
 from gym import spaces
 from geometry_msgs.msg import Vector3, Point, Quaternion, Pose, Twist, Wrench
 from quad_controller_rl.tasks.base_task import BaseTask
+
+def unit_vec(vec):
+    norm = np.linalg.norm(vec)
+    return np.zeros(3) if norm == 0 else vec/norm
 
 class Takeoff(BaseTask):
     """Simple task where the goal is to lift off the ground and reach a target height."""
@@ -33,7 +38,7 @@ class Takeoff(BaseTask):
         # self.target_z = 10.0  # target height (z position) to reach for successful takeoff
         # 需要更确切的target，提供三维坐标
         self.target_point = np.array([0.0, 0.0, 10.0])
-        self.threshold = 3.0
+        self.last_pose = None
 
     def reset(self):
         # Nothing to reset; just return initial condition
@@ -53,34 +58,70 @@ class Takeoff(BaseTask):
 
         # Compute reward / penalty and check if this episode is complete
         done = False
-        '''项目自带reward判定方式------------------------------------'''
-        # reward = -min(abs(self.target_z - pose.position.z), 20.0)  # reward = zero for matching target z, -ve as you go farther, upto -20
-        # if pose.position.z >= self.target_z:  # agent has crossed the target height
-        #     reward += 10.0  # bonus reward
-        #     done = True
-        # elif timestamp > self.max_duration:  # agent has run out of time
-        #     reward -= 10.0  # extra penalty
-        #     done = True
-        '''----------------------------------------------------------'''
-        # 1. 当前位置和target_point越近越好（考虑到需要克服重力，z轴减小惩罚）
-        # 2. 尽量小的翻转
         curr_point = np.array([pose.position.x, pose.position.y, pose.position.z])
-        # dist_xy = np.linalg.norm(curr_point[:1] - self.target_point[:1])
-        # dist_z = np.abs(curr_point[2] - self.target_point[2])
+        '''项目自带reward判定方式------------------------------------'''
+        target_z = self.target_point[2]
+        reward = -min(abs(target_z - pose.position.z), 20.0)  # reward = zero for matching target z, -ve as you go farther, upto -20
+        if pose.position.z >= target_z:  # agent has crossed the target height
+            reward += 10.0  # bonus reward
+            done = True
+        elif timestamp > self.max_duration:  # agent has run out of time
+            reward -= 10.0  # extra penalty
+            done = True
+        '''----------------------------------------------------------'''
+        # 1. 当前位置和target_point越近越好
+        # 2. 尽量小的翻转
+        # curr_point = np.array([pose.position.x, pose.position.y, pose.position.z])
+        # reward_x, reward_y, reward_z = [
+        #     -min(20, abs(curr_point[i] - self.target_point[i])) for i in range(3)]
+        
+        # reward_z = (reward_z + 20)**3 / 200.0
+        # reward_x /= 1.5
+        # reward_y /= 1.5
+
+        # reward = reward_x + reward_y + reward_z
+        # dist = np.linalg.norm(curr_point - self.target_point)
+
+        # if curr_point[2] >= self.target_point[2]:
+        #     reward += 15.0
+        #     done = True
+        # elif timestamp > self.max_duration:
+        #     reward -= 15.0
+        #     done = True
+        '''-----------------------------------------------------------------'''
+        # 奖励设定为最小化速度向量和方位向量夹角
         dist = np.linalg.norm(curr_point - self.target_point)
+        # la = linear_acceleration
+        # acc_vec = np.array([la.x, la.y, la.z])
+        # acc_unit_vec = unit_vec(acc_vec)
 
-        # reward_xy = min(np.log(1/(dist_xy/100 + 1e-6)), 8)-5
-        # reward_z = min(np.log(1/(dist_z/500 + 1e-6)), 8)
-        reward = min(np.log(1/(dist/500 + 1e-6)), 8)
+        # s_vec = self.target_point - curr_point
+        # s_unit_vec = unit_vec(s_vec)
 
-        if curr_point[2] >= self.target_point[2]:
-            reward += 10.0 
-            done = True
-        elif timestamp > self.max_duration:
-            reward -= 10.0
-            done = True
+        # delta_orein = abs(s_unit_vec - acc_unit_vec)
 
-        print('realtime reword is {:.3f} | dist is {:.3f}'.format(
+        # rx = min(5, np.log(1/(delta_orein[0] + 1e-10))-15)/3
+        # ry = min(5, np.log(1/(delta_orein[1] + 1e-10))-15)/3
+        # rz = min(5, np.log(1/(delta_orein[2] + 1e-10))-15)
+
+        # reward = rx + ry + rz
+
+        # if curr_point[2] >= self.target_point[2]:
+        #     reward += 15.0
+        #     done = True
+        # elif timestamp > self.max_duration:
+        #     reward -= 15.0
+        #     done = True        
+
+        # print('suv {:7.3f} {:7.3f} {:7.3f} | '
+        #     'accuv {:7.3f} {:7.3f} {:7.3f} | '
+        #     'delor {:7.3f} {:7.3f} {:7.3f} | '
+        #     'reward {:7.3f} | dist {:7.3f}'.format(s_unit_vec[0], s_unit_vec[1], s_unit_vec[2],
+        #         acc_unit_vec[0], acc_unit_vec[1], acc_unit_vec[2],
+        #         delta_orein[0], delta_orein[1], delta_orein[2],
+        #         reward, dist),end='\r')
+        '''----------------------------------------------------------------'''
+        print('realtime reword: {:.3f} | dist is {:.3f}'.format(
             reward, dist),end='\r')
 
         # Take one RL step, passing in current state and reward, and obtain action
